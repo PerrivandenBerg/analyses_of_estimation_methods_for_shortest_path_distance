@@ -1,6 +1,5 @@
 import networkx as nx
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 import numpy as np
 import seaborn as sns
 import pandas as pd
@@ -160,121 +159,85 @@ def get_bounds(s: int, t: int, marks: List[int]
 #     G.add_edge(n1, n2, weight=1)
 
 # TODO: Import the real-world graph, random for now.
-G = nx.erdos_renyi_graph(1000, 0.05, seed=42, directed=False)
+G = nx.erdos_renyi_graph(100, 0.1, seed=42, directed=False)
 
 # Number of landmarks in the graph.
-marks_n = 5
+marks_n = 5 
 
 # Selection
-marks_rand  = rand_landmarks(G, marks_n)
-marks_deg   = deg_landmarks(G, marks_n)
-marks_cc    = cc_landmarks(G, marks_n)
-marks_deg_p = deg_p_landmarks(G, marks_n, 1)
-marks_cc_p  = cc_p_landmarks(G, marks_n, 1)
-marks_bord  = border_landmarks(G, marks_n)
+# marks_rand = rand_landmarks(G, marks_n)
+# marks_deg  = deg_landmarks(G, marks_n)
+marks_cc   = cc_p_landmarks(G, marks_n, 1)
 
 # Store distances of landmarks and points.
-marks_dis_rand  = all_landmark_distances(G, marks_rand)
-marks_dis_deg   = all_landmark_distances(G, marks_deg)
-marks_dis_cc    = all_landmark_distances(G, marks_cc)
-marks_dis_deg_p = all_landmark_distances(G, marks_deg_p)
-marks_dis_cc_p  = all_landmark_distances(G, marks_cc_p)
-marks_dis_bord  = all_landmark_distances(G, marks_bord)
+# marks_dis_rand = all_landmark_distances(G, marks_rand)
+# marks_dis_deg  = all_landmark_distances(G, marks_deg)
+marks_dis_cc   = all_landmark_distances(G, marks_cc)
 
 
 # FROM HERE ON IT SHOULD BE VERY FAST! -----------------------------------------
 
 
-# Do a lot of experiments of distance estimation between 2 points and average
-# the error margine compared to the actual answer.
+# We do a lot of experiments and see how the degree of a note pair influences 
+# the estimation method that we could best use for the estimating the distance
+# between a node pair.
 n = 1000  # Number of experiments.
 
-# Storage of the data.
-methods_list = ['rand', 'deg', 'cc', 'deg_p', 'cc_p', 'bord']
-error_dict = {
-    'rand': {1: [], 2: [], 3: [], 4: []},
-    'deg': {1: [], 2: [], 3: [], 4: []},
-    'cc': {1: [], 2: [], 3: [], 4: []},
-    'deg_p': {1: [], 2: [], 3: [], 4: []},
-    'cc_p': {1: [], 2: [], 3: [], 4: []},
-    'bord': {1: [], 2: [], 3: [], 4: []},
-}
+print("Calculations go brrrr")
 
-# Perform distance estimation experiments.
-for i in range(n):
-    s, t = random.choice(list(G.nodes)), random.choice(list(G.nodes))
+# Collect the data.
+results = {method: [] for method in range(1, 5)}
+for _ in range(n):
+    # Randomly select two nodes
+    s, t = random.sample(G.nodes, 2)
+    deg_s, deg_t = G.degree[s], G.degree[t]
+    
+    # Random landmark selection
+    # lb_rand, ub_rand = get_bounds(s, t, marks_rand, marks_dis_rand)
+    # lb_deg, ub_deg = get_bounds(s, t, marks_deg, marks_dis_deg)
+    lb, ub = get_bounds(s, t, marks_cc, marks_dis_cc)
 
-    if nx.has_path(G, s, t):
-        # Compute bounds for different landmark selection methods.
-        lb_rand, ub_rand = get_bounds(s, t, marks_rand, marks_dis_rand)
-        lb_deg, ub_deg = get_bounds(s, t, marks_deg, marks_dis_deg)
-        lb_cc, ub_cc = get_bounds(s, t, marks_cc, marks_dis_cc)
-        lb_deg_p, ub_deg_p = get_bounds(s, t, marks_deg_p, marks_dis_deg_p)
-        lb_cc_p, ub_cc_p = get_bounds(s, t, marks_cc_p, marks_dis_cc_p)
-        lb_bord, ub_bord = get_bounds(s, t, marks_bord, marks_dis_bord)
-        
-        actual_result = nx.dijkstra_path_length(G, s, t)
+    actual_result = nx.dijkstra_path_length(G, s, t)
 
-        # Store the errors for each method and estimation.
-        for method, (lb, ub) in zip(methods_list, 
-                        [(lb_rand, ub_rand), (lb_deg, ub_deg), (lb_cc, ub_cc),
-                         (lb_deg_p, ub_deg_p), (lb_cc_p, ub_cc_p), (lb_bord, ub_bord)]):
-            for est_method in range(1, 5):
-                estimated = estimate_bound(lb, ub, est_method)
-                error_dict[method][est_method].append(estimated - actual_result)
+    # Store results
+    for est_method in range(1, 5):
+        estimated = estimate_bound(lb, ub, est_method)
+        results[est_method].append((deg_s, deg_t, actual_result, estimated))
 
-# Calculate the mean and std.
-means = {}
-stds = {}
-for method in methods_list:
-    means[method] = [np.mean(error_dict[method][i]) for i in range(1, 5)]
-    stds[method] = [np.std(error_dict[method][i]) for i in range(1, 5)]
+print("We do be plotting")
 
 # Plotting
-methods = ['Random', 'Degree', 'Closeness Centrality', "Degree (P)", 
-           "Closeness Centrality (P)", "Border"]
-estimations = ['Upperbound', 'Lowerbound', 'Average', 'Square Root']
-colors = ['skyblue', 'lightgreen', 'salmon', 'gold']
+deg_thres = 10  # Degree threshold for binning
+methods = ['Upperbound', 'Lowerbound', 'Average', 'Square Root']
+file = ['upper', 'lower', 'avg', 'sqrt']
 
-fig, ax = plt.subplots(figsize=(14, 8))
+# Prepare a 2x2 grid for subplots
+fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+axes = axes.flatten()  # Flatten for easier iteration over axes
 
-# Collect data for boxplots
-boxplot_data = []
-positions = []
-labels = []
+for method, data in results.items():
+    degree_bins = {"high-high": [], "high-low": [], "low-high": [], "low-low": []}
+    
+    for deg1, deg2, actual, estimate in data:
+        bin_label = (
+            "high-high" if deg1 > deg_thres and deg2 > deg_thres else
+            "high-low" if deg1 > deg_thres and deg2 <= deg_thres else
+            "low-high" if deg1 <= deg_thres and deg2 > deg_thres else
+            "low-low"
+        )
+        degree_bins[bin_label].append(abs(actual - estimate))  # Absolute error
+    
+    # Average errors for each bin
+    avg_errors = {label: np.mean(errors) if errors else 0 for label, errors in degree_bins.items()}
+    
+    # Plot on the corresponding subplot
+    ax = axes[method - 1]
+    ax.bar(avg_errors.keys(), avg_errors.values())
+    ax.set_title(f"Performance of {methods[method-1]}")
+    ax.set_ylabel("Average Error")
+    ax.set_xlabel("Degree Combination")
 
-width = 0.7  # Width of each group of boxplots
-offset = 0.15  # Spacing between boxplots within a group
-
-# Build grouped boxplots for each method
-for i, method in enumerate(methods_list):
-    method_position = i * (width + offset)  # Starting position for the group
-    for j in range(4):  # Loop over estimation methods
-        est_data = error_dict[method][j + 1]  # Estimation method data
-        boxplot_data.append(est_data)
-        positions.append(method_position + j * offset)
-    labels.append(methods[i])  # Add group label (once per method)
-
-# Create the boxplots
-bp = ax.boxplot(boxplot_data, positions=positions, patch_artist=True, widths=offset / 1.5, notch=True)
-
-# Color the boxplots based on the estimation methods
-for patch, color in zip(bp['boxes'], colors * len(methods_list)):
-    patch.set_facecolor(color)
-
-# Add a legend for the colors
-legend_handles = [mpatches.Patch(color=color, label=estimations[idx]) for idx, color in enumerate(colors)]
-ax.legend(handles=legend_handles, title="Estimation Methods", loc="upper right", fontsize=10)
-
-# Add labels and title
-ax.set_ylabel('Absolute Error', fontsize=12)
-ax.set_xlabel('Graph Selection Methods', fontsize=12)
-ax.set_title('Boxplot of Estimation Errors for Various Methods', fontsize=14)
-ax.set_xticks([i * (width + offset) + offset for i in range(len(methods_list))])
-ax.set_xticklabels(labels, fontsize=10)
-ax.grid(axis='y', linestyle='--', alpha=0.7)
-
-# Adjust layout and save
+# Adjust layout and save figure
 plt.tight_layout()
-plt.savefig('error_boxplot.eps', format='eps')
+plt.savefig('performance_comparison.eps', format='eps')
 plt.show()

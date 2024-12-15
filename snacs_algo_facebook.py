@@ -181,7 +181,6 @@ def get_bounds(s: int, t: int, marks: List[int]
 # CODE -------------------------------------------------------------------------
 
 name = "facebook"  # Name of dataset
-threshold = 44  # Degree threshold for binning
 n = 10000  # Number of experiments.
 
 # Import dataset
@@ -208,6 +207,9 @@ print(f"Degree Statistics:")
 print(f"  - Minimum degree: {min(degree_sequence)}")
 print(f"  - Maximum degree: {max(degree_sequence)}")
 print(f"  - Average degree: {np.mean(degree_sequence):.2f}")
+threshold = np.median(degree_sequence)  # Degree threshold for binning
+print(f"  - Median degree : {threshold:.2f}")
+
 
 # Sparsity
 num_nodes = G.number_of_nodes()

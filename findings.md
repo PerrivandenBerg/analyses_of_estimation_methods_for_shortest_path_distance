@@ -1,10 +1,10 @@
 ## Findings during the project
+Here are the findings (in short details) that we found after the application
+on the mentioned datasets:
+   - We found that the Degree and Deg-1 landmark selection methods performed the
+   best with all the estimation methods.
+   - We found that taking the Upperbound estimation method works best for the Degree and Deg-1 landmark selection methods.
+   - We found that CC and CC-1 performed the least optimal.
+   - The Random landmark selection method performed best in sparse graphs with a low medium degree.
 
-- The path estimation struggles with a graph which has many small connected 
-components. We might need to consider the largest connected component or make
-something so we can be sure that there is no path between 2 points using the
-data from the landmarks.
-
-- On random Erdos Renyi graphs, the square root method seems to work the best,
-with the "Only Upperbound" and "Only Lowerbound" estimation methods performing 
-the worst.
+During testing, we did not recalculate the landmarks for the Random method. The other methods were deterministic. Tiebreakers were handled by Python's sorting function. 

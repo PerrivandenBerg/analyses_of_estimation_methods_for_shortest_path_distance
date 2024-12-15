@@ -19,6 +19,38 @@ def all_landmark_distances(G: nx.Graph, landmarks: List[int]
         distances[l] = nx.single_source_dijkstra_path_length(G, l)
     return distances
 
+# Closeness Centrallity Estimation ---------------------------------------------
+
+## Approximate closeness centrality for nodes in a large network using sampling.
+def approximate_closeness_centrality(G: nx.Graph, n=100) -> List[Tuple]:
+   # Randomly sample seed nodes
+    nodes = list(G.nodes())
+    seed_nodes = random.sample(nodes, min(n, len(nodes)))
+
+    # Initialize distance sum for each node
+    dist_sum = {node: 0 for node in nodes}
+    reach = {node: 0 for node in nodes}
+
+    for s in seed_nodes:
+        # Perform BFS/SSSP from each seed
+        shortest_paths = nx.single_source_shortest_path_length(G, s)
+        
+        for t, dist in shortest_paths.items():
+            dist_sum[t] += dist
+            reach[t] += 1
+
+    # Compute cc for each node.
+    cc_approx = []
+    for node in nodes:
+        if reach[node] > 0:  # Avoid division by zero
+            avg_dist = dist_sum[node] / reach[node]
+            cc_approx.append((node, (reach[node] / len(nodes)) / avg_dist))
+        else:
+            cc_approx.append((node, 0))
+
+    return cc_approx
+
+
 
 # Estimation Methods -----------------------------------------------------------
 
@@ -65,14 +97,14 @@ def deg_landmarks(G: nx.Graph, k: int) -> List[int]:
     sorted_nodes = sorted(G.degree, key=lambda x: x[1], reverse=True)
     return [node for node, _ in sorted_nodes[:k]]
 
-## Closeness Centrality-based
-def cc_landmarks(G: nx.Graph, k: int) -> List[int]:
-    centrality = nx.closeness_centrality(G) # TODO: Maybe something faster?
-    sorted_nodes = sorted(centrality.items(), key=lambda x: x[1], reverse=True)
+## Closeness Centrality-based (select lowest centrality)
+def cc_landmarks(G: nx.Graph, k: int, nodes: List[Tuple]) -> List[int]:
+    sorted_nodes = sorted(nodes, key=lambda x: x[1])
     return [node for node, _ in sorted_nodes[:k]]
 
-## Degree-based where we have landmarks be at least 'p' nodes apart.
-def deg_p_landmarks(G: nx.Graph, k: int, p: int) -> List[int]:
+## Degree-based where landmarks cannot be neighbors.
+def deg_1_landmarks(G: nx.Graph, k: int) -> List[int]:
+    p = 1  # Best value according to the paper.
     sorted_nodes = sorted(G.degree, key=lambda x: x[1], reverse=True)
     selected = []
     for node, _ in sorted_nodes:
@@ -82,11 +114,11 @@ def deg_p_landmarks(G: nx.Graph, k: int, p: int) -> List[int]:
             selected.append(node)
     return selected
 
-## Closeness Centrality-based where we have landmarks be at least 'p' nodes apart.
+## Closeness Centrality-based where landmarks cannot be neighbors.
 ## Note: Doesn't strictly return k nodes.
-def cc_p_landmarks(G: nx.Graph, k: int, p: int) -> List[int]:
-    centrality = nx.closeness_centrality(G)
-    sorted_nodes = sorted(centrality.items(), key=lambda x: x[1], reverse=True)
+def cc_1_landmarks(G: nx.Graph, k: int, nodes: List[Tuple]) -> List[int]:
+    p = 1  # Best value according to the paper.
+    sorted_nodes = sorted(nodes, key=lambda x: x[1])
     selected = []
     for node, _ in sorted_nodes:
         if len(selected) >= k:
@@ -148,133 +180,227 @@ def get_bounds(s: int, t: int, marks: List[int]
 
 # CODE -------------------------------------------------------------------------
 
-# TODO: Find good datasets for our research.
-# # Use a network stored as CSV and import it.
-# df = pd.read_csv('file.csv', sep=',', header=None, names=['node1', 'node2', 
-#                  'weight'])
-# 
-# G = nx.DiGraph()
-# for _, row in df.iterrows():
-#     n1 = row['node1']
-#     n2 = row['node2']
-#     G.add_edge(n1, n2, weight=1)
+name = "facebook"  # Name of dataset
+threshold = 44  # Degree threshold for binning
+n = 10000  # Number of experiments.
 
-# TODO: Import the real-world graph, random for now.
-G = nx.erdos_renyi_graph(1000, 0.05, seed=42, directed=False)
+# Import dataset
+
+print(f"DEBUG: Starting...")
+
+df = pd.read_csv(f'{name}.csv', sep=' ', header=None, names=['node1', 'node2'])
+
+G_all = nx.Graph()
+for _, row in df.iterrows():
+    n1 = row['node1']
+    n2 = row['node2']
+    G_all.add_edge(n1, n2, weight=1)
+
+G_largest = max(nx.connected_components(G_all), key=len)
+G = G_all.subgraph(G_largest)
+
+# Important info about graph:
+print(f"Number of nodes: {G.number_of_nodes()}")
+print(f"Number of edges: {G.number_of_edges()}")
+
+degree_sequence = list(dict(G.degree()).values())
+print(f"Degree Statistics:")
+print(f"  - Minimum degree: {min(degree_sequence)}")
+print(f"  - Maximum degree: {max(degree_sequence)}")
+print(f"  - Average degree: {np.mean(degree_sequence):.2f}")
+
+# Sparsity
+num_nodes = G.number_of_nodes()
+num_edges = G.number_of_edges()
+max_possible_edges = num_nodes * (num_nodes - 1) / 2
+sparsity = (2 * num_edges) / max_possible_edges
+print(f"Sparsity of the graph: {sparsity:.4e}")
+
+
+
 
 # Number of landmarks in the graph.
-marks_n = 5
+for marks_n in [20, 100]:
 
-# Selection
-marks_rand  = rand_landmarks(G, marks_n)
-marks_deg   = deg_landmarks(G, marks_n)
-marks_cc    = cc_landmarks(G, marks_n)
-marks_deg_p = deg_p_landmarks(G, marks_n, 1)
-marks_cc_p  = cc_p_landmarks(G, marks_n, 1)
-marks_bord  = border_landmarks(G, marks_n)
+    print(f"DEBUG [{marks_n}]: Now starting marks_n.")
 
-# Store distances of landmarks and points.
-marks_dis_rand  = all_landmark_distances(G, marks_rand)
-marks_dis_deg   = all_landmark_distances(G, marks_deg)
-marks_dis_cc    = all_landmark_distances(G, marks_cc)
-marks_dis_deg_p = all_landmark_distances(G, marks_deg_p)
-marks_dis_cc_p  = all_landmark_distances(G, marks_cc_p)
-marks_dis_bord  = all_landmark_distances(G, marks_bord)
+    # Approximate Closeness Centrallity for each node
+    cc_nodes = approximate_closeness_centrality(G, 1000)
+
+    # Selection
+    marks_rand  = rand_landmarks(G, marks_n)
+    marks_deg   = deg_landmarks(G, marks_n)
+    marks_cc    = cc_landmarks(G, marks_n, cc_nodes)
+    marks_deg_1 = deg_1_landmarks(G, marks_n)
+    marks_cc_1  = cc_1_landmarks(G, marks_n, cc_nodes)
+
+    # Store distances of landmarks and points.
+    marks_dis_rand  = all_landmark_distances(G, marks_rand)
+    marks_dis_deg   = all_landmark_distances(G, marks_deg)
+    marks_dis_cc    = all_landmark_distances(G, marks_cc)
+    marks_dis_deg_1 = all_landmark_distances(G, marks_deg_1)
+    marks_dis_cc_1  = all_landmark_distances(G, marks_cc_1)
+
+    print(f"DEBUG [{marks_n}]: Landmarks calculated.")
+
+    # FROM HERE ON IT SHOULD BE VERY FAST! -----------------------------------------
+
+    # Storage of the data.
+    methods_list = ['rand', 'deg', 'cc', 'deg_1', 'cc_1']
+
+    # Error
+    error_dict = {
+        'rand': {1: [], 2: [], 3: [], 4: []},
+        'deg': {1: [], 2: [], 3: [], 4: []},
+        'cc': {1: [], 2: [], 3: [], 4: []},
+        'deg_1': {1: [], 2: [], 3: [], 4: []},
+        'cc_1': {1: [], 2: [], 3: [], 4: []},
+    }
+
+    # The degree-based Lower / Upperbound estimation.
+    deg_LU_est = {
+        'rand': {1: [], 2: [], 3: [], 4: []},
+        'deg': {1: [], 2: [], 3: [], 4: []},
+        'cc': {1: [], 2: [], 3: [], 4: []},
+        'deg_1': {1: [], 2: [], 3: [], 4: []},
+        'cc_1': {1: [], 2: [], 3: [], 4: []},
+    }
+
+    # Perform distance estimation experiments.
+    for i in range(n):
+        s, t = random.choice(list(G.nodes)), random.choice(list(G.nodes))
+        deg_s, deg_t = G.degree[s], G.degree[t]
+
+        if nx.has_path(G, s, t):
+            # Compute bounds for different landmark selection methods.
+            lb_rand, ub_rand = get_bounds(s, t, marks_rand, marks_dis_rand)
+            lb_deg, ub_deg = get_bounds(s, t, marks_deg, marks_dis_deg)
+            lb_cc, ub_cc = get_bounds(s, t, marks_cc, marks_dis_cc)
+            lb_deg_1, ub_deg_1 = get_bounds(s, t, marks_deg_1, marks_dis_deg_1)
+            lb_cc_1, ub_cc_1 = get_bounds(s, t, marks_cc_1, marks_dis_cc_1)
+            
+            actual_result = nx.shortest_path_length(G, s, t)
+
+            # Go over all combinations.
+            for method, (lb, ub) in zip(methods_list, 
+                            [(lb_rand, ub_rand), (lb_deg, ub_deg), (lb_cc, ub_cc),
+                            (lb_deg_1, ub_deg_1), (lb_cc_1, ub_cc_1)]):
+                for est_method in range(1, 5):
+                    estimated = estimate_bound(ub, lb, est_method)
+
+                    # Part 1: Store the errors for each method and estimation.
+                    error_dict[method][est_method].append(1/n * (estimated - actual_result))
+
+                    # Part 2: Degree based nodes.
+                    deg_LU_est[method][est_method].append((deg_s, deg_t, actual_result, estimated))
+
+    # Preparing Data for Plotting
+    boxplot_data = []
+    positions = []
+    labels = []
+    methods = ['Random', 'Degree', 'Closeness Centrality', "Degree (1)", 
+            "Closeness Centrality (1)"]
+    estimations = ['Upperbound', 'Lowerbound', 'Average', 'Square Root']
+
+    width = 1.2  # Group width
+    offset = 0.25  # Distance between boxplots within each group
+    group_spacing = 1.5  # Distance between groups
+
+    print(f"DEBUG [{marks_n}]: Part 1.")
+
+    # PART 1 -----------------------------------------------------------------------
+
+    # Collect data for boxplots grouped by method and estimation method
+    for i, method in enumerate(methods_list):
+        method_position = i * group_spacing  # Start of each group
+        for j in range(4):  # Four estimation methods
+            est_data = error_dict[method][j + 1]  # Error data for the estimation method
+            boxplot_data.append(est_data)
+            positions.append(method_position + j * offset)
+        labels.append(methods[i])  # Add method label
+
+    # Plot Setup
+    fig, ax = plt.subplots(figsize=(16, 10))
+
+    # Create Boxplots
+    bp = ax.boxplot(boxplot_data, positions=positions, patch_artist=True, widths=offset / 1.5, showmeans=True, meanline=True)
+
+    # Use distinct colors for each estimation method
+    palette = sns.color_palette("pastel", 4)  # Use pastel shades for consistency
+    for patch, color in zip(bp['boxes'], palette * len(methods_list)):
+        patch.set_facecolor(color)
+
+    # Overlay the mean values as markers
+    for pos, data in zip(positions, boxplot_data):
+        mean_value = np.mean(data)
+        ax.scatter(pos, mean_value, color='black', marker='o', label='Mean', s=30, zorder=3)
+
+    # Add legend for estimation methods
+    legend_handles = [mpatches.Patch(color=palette[idx], label=estimations[idx]) for idx in range(4)]
+    ax.legend(handles=legend_handles, title="Estimation Methods", loc="upper right", fontsize=12)
+
+    # Add labels and titles
+    ax.set_xticks([i * group_spacing + 1.5 * offset for i in range(len(methods_list))])
+    ax.set_xticklabels(labels, fontsize=11, ha='right')
+    ax.set_ylabel('Error', fontsize=13)
+    ax.set_title('Error Comparison Across Graph Selection Methods', fontsize=16)
+
+    # Enhance grid and layout
+    ax.grid(axis='y', linestyle='--')
+    plt.tight_layout()
+
+    # Save and Display Plot
+    plt.savefig(f'error_{name}_{marks_n}.eps', format='eps')
 
 
-# FROM HERE ON IT SHOULD BE VERY FAST! -----------------------------------------
+    # PART 2 -----------------------------------------------------------------------
+
+    print(f"DEBUG [{marks_n}]: Part 2.")
+
+    for est in range(1, 5):
+
+        categories = ["L-L", "L-H", "H-L", "H-H"]
+
+        # Prepare data for bar plot
+        grouped_data = {method: {cat: [] for cat in categories} for method in methods_list}
+
+        for method in methods_list:
+            for deg_s, deg_t, actual, estimated in deg_LU_est[method][est]:
+                error = abs(estimated - actual)
+                if deg_s < threshold and deg_t < threshold:
+                    grouped_data[method]["L-L"].append(error)
+                elif deg_s < threshold and deg_t >= threshold:
+                    grouped_data[method]["L-H"].append(error)
+                elif deg_s >= threshold and deg_t < threshold:
+                    grouped_data[method]["H-L"].append(error)
+                elif deg_s >= threshold and deg_t >= threshold:
+                    grouped_data[method]["H-H"].append(error)
+
+        # Compute means for the grouped bar plot
+        means = {method: [np.mean(grouped_data[method][cat]) if grouped_data[method][cat] else 0
+                        for cat in categories] for method in methods_list}
+
+        # Create grouped bar plot
+        x = np.arange(len(categories))  # Category positions
+        width = 0.15  # Width of each bar
+
+        fig, ax = plt.subplots(figsize=(12, 6))
+
+        for i, method in enumerate(methods_list):
+            ax.bar(x + i * width, means[method], width, label=methods[i])
+
+        # Formatting
+        ax.set_title(f"{estimations[est-1]} Errors Based on Degree", fontsize=16)
+        ax.set_xticks(x + width * (len(methods_list) - 1) / 2)
+        ax.set_xticklabels(categories, fontsize=12)
+        ax.set_ylabel('Absolute Mean Error', fontsize=12)
+        ax.legend(title="Methods", fontsize=10)
+        plt.tight_layout()
+
+        # Save and display
+        plt.savefig(f'degree_error_{name}_{marks_n}_{est}.eps', format='eps')
 
 
-# Do a lot of experiments of distance estimation between 2 points and average
-# the error margine compared to the actual answer.
-n = 1000  # Number of experiments.
+    print(f"DEBUG [{marks_n}]: Completed.")
 
-# Storage of the data.
-methods_list = ['rand', 'deg', 'cc', 'deg_p', 'cc_p', 'bord']
-error_dict = {
-    'rand': {1: [], 2: [], 3: [], 4: []},
-    'deg': {1: [], 2: [], 3: [], 4: []},
-    'cc': {1: [], 2: [], 3: [], 4: []},
-    'deg_p': {1: [], 2: [], 3: [], 4: []},
-    'cc_p': {1: [], 2: [], 3: [], 4: []},
-    'bord': {1: [], 2: [], 3: [], 4: []},
-}
-
-# Perform distance estimation experiments.
-for i in range(n):
-    s, t = random.choice(list(G.nodes)), random.choice(list(G.nodes))
-
-    if nx.has_path(G, s, t):
-        # Compute bounds for different landmark selection methods.
-        lb_rand, ub_rand = get_bounds(s, t, marks_rand, marks_dis_rand)
-        lb_deg, ub_deg = get_bounds(s, t, marks_deg, marks_dis_deg)
-        lb_cc, ub_cc = get_bounds(s, t, marks_cc, marks_dis_cc)
-        lb_deg_p, ub_deg_p = get_bounds(s, t, marks_deg_p, marks_dis_deg_p)
-        lb_cc_p, ub_cc_p = get_bounds(s, t, marks_cc_p, marks_dis_cc_p)
-        lb_bord, ub_bord = get_bounds(s, t, marks_bord, marks_dis_bord)
-        
-        actual_result = nx.dijkstra_path_length(G, s, t)
-
-        # Store the errors for each method and estimation.
-        for method, (lb, ub) in zip(methods_list, 
-                        [(lb_rand, ub_rand), (lb_deg, ub_deg), (lb_cc, ub_cc),
-                         (lb_deg_p, ub_deg_p), (lb_cc_p, ub_cc_p), (lb_bord, ub_bord)]):
-            for est_method in range(1, 5):
-                estimated = estimate_bound(lb, ub, est_method)
-                error_dict[method][est_method].append(estimated - actual_result)
-
-# Calculate the mean and std.
-means = {}
-stds = {}
-for method in methods_list:
-    means[method] = [np.mean(error_dict[method][i]) for i in range(1, 5)]
-    stds[method] = [np.std(error_dict[method][i]) for i in range(1, 5)]
-
-# Plotting
-methods = ['Random', 'Degree', 'Closeness Centrality', "Degree (P)", 
-           "Closeness Centrality (P)", "Border"]
-estimations = ['Upperbound', 'Lowerbound', 'Average', 'Square Root']
-colors = ['skyblue', 'lightgreen', 'salmon', 'gold']
-
-fig, ax = plt.subplots(figsize=(14, 8))
-
-# Collect data for boxplots
-boxplot_data = []
-positions = []
-labels = []
-
-width = 0.7  # Width of each group of boxplots
-offset = 0.15  # Spacing between boxplots within a group
-
-# Build grouped boxplots for each method
-for i, method in enumerate(methods_list):
-    method_position = i * (width + offset)  # Starting position for the group
-    for j in range(4):  # Loop over estimation methods
-        est_data = error_dict[method][j + 1]  # Estimation method data
-        boxplot_data.append(est_data)
-        positions.append(method_position + j * offset)
-    labels.append(methods[i])  # Add group label (once per method)
-
-# Create the boxplots
-bp = ax.boxplot(boxplot_data, positions=positions, patch_artist=True, widths=offset / 1.5, notch=True)
-
-# Color the boxplots based on the estimation methods
-for patch, color in zip(bp['boxes'], colors * len(methods_list)):
-    patch.set_facecolor(color)
-
-# Add a legend for the colors
-legend_handles = [mpatches.Patch(color=color, label=estimations[idx]) for idx, color in enumerate(colors)]
-ax.legend(handles=legend_handles, title="Estimation Methods", loc="upper right", fontsize=10)
-
-# Add labels and title
-ax.set_ylabel('Absolute Error', fontsize=12)
-ax.set_xlabel('Graph Selection Methods', fontsize=12)
-ax.set_title('Boxplot of Estimation Errors for Various Methods', fontsize=14)
-ax.set_xticks([i * (width + offset) + offset for i in range(len(methods_list))])
-ax.set_xticklabels(labels, fontsize=10)
-ax.grid(axis='y', linestyle='--', alpha=0.7)
-
-# Adjust layout and save
-plt.tight_layout()
-plt.savefig('error_boxplot.eps', format='eps')
-plt.show()
+print(f"DEBUG: Completed.")
